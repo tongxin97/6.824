@@ -57,10 +57,7 @@ func doReduce(
 	for m := 0; m < nMap; m++ {
 		reduceFileName := reduceName(jobName, m, reduceTask)
 		f, err := os.Open(reduceFileName)
-		// nothing assigned to this reducer from map task m
-		if err != nil {
-			continue
-		}
+		ErrCheck(err)
 		dec := json.NewDecoder(f)
 		kvs := []KeyValue{}
 		var kv KeyValue

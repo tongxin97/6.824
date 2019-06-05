@@ -57,6 +57,13 @@ func doMap(
 	// Your code here (Part I).
 	//
 
+	for r := 0; r < nReduce; r++ {
+		reduceFileName := reduceName(jobName, mapTask, r)
+		f, err := os.Create(reduceFileName)
+		ErrCheck(err)
+		f.Close()
+	}
+
 	bytes, err := ioutil.ReadFile(inFile)
 	ErrCheck(err)
 	content := string(bytes)

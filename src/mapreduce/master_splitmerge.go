@@ -53,9 +53,8 @@ func (mr *Master) merge() {
 // removeFile is a simple wrapper around os.Remove that logs errors.
 func removeFile(n string) {
 	err := os.Remove(n)
-	// NOTE: we are not creating all reduce files (reducers not assigned do not get an empty file for the map job)
 	if err != nil {
-		// log.Println("CleanupFiles ", err)
+		log.Println("CleanupFiles ", err)
 	}
 }
 
