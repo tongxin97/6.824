@@ -41,7 +41,7 @@ func ReduceFunc(key string, values []string) string {
 	return ""
 }
 
-// Checks input file agaist output file: each input number should show up
+// Checks input file against  output file: each input number should show up
 // in the output file in string sorted order
 func check(t *testing.T, files []string) {
 	output, err := os.Open("mrtmp.test")
@@ -64,6 +64,11 @@ func check(t *testing.T, files []string) {
 	}
 
 	sort.Strings(lines)
+	// f, err := os.Create("lines")
+	// for _, l := range lines {
+	// 	f.WriteString(l + "\n")
+	// }
+	// f.Close()
 
 	outputScanner := bufio.NewScanner(output)
 	i := 0
