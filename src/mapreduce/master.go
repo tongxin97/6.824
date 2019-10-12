@@ -12,11 +12,10 @@ import (
 
 // Master holds all the state that the master needs to keep track of.
 type Master struct {
-	sync.Mutex
-
 	address     string
 	doneChannel chan bool
 
+	sync.Mutex
 	// protected by the mutex
 	newCond *sync.Cond // signals when Register() adds to workers[]
 	workers []string   // each worker's UNIX-domain socket name -- its RPC address

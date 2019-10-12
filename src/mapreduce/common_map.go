@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"io/ioutil"
+	"log"
 	"os"
 )
 
@@ -56,28 +57,33 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
-
-	for r := 0; r < nReduce; r++ {
-		reduceFileName := reduceName(jobName, mapTask, r)
-		f, err := os.Create(reduceFileName)
-		ErrCheck(err)
-		f.Close()
+	fileContent, readError := ioutil.ReadFile(inFile)
+	if readError != nil {
+		log.Fatal("ERROR: can not read file. ", readError)
 	}
-
-	bytes, err := ioutil.ReadFile(inFile)
-	ErrCheck(err)
-	content := string(bytes)
-	kvs := mapF(inFile, content)
-	reduceTask := iHash(content) % nReduce
-	reduceFileName := reduceName(jobName, mapTask, reduceTask)
-	f, err := os.Create(reduceFileName)
-	ErrCheck(err)
-	enc := json.NewEncoder(f)
-	for _, kv := range kvs {
-		err := enc.Encode(&kv)
-		ErrCheck(err)
+	keyValues := mapF(inFile, string(fileContent))
+	intermediateFiles := map[string]*os.File{}
+	intermediateEncoders := map[string]*json.Encoder{}
+	for _, value := range keyValues {
+		intermediateFileName := reduceName(jobName, mapTask, (iHash(value.Key) % nReduce))
+		encoder, exists := intermediateEncoders[intermediateFileName]
+		if !exists {
+			file, fileCreateError := os.Create(intermediateFileName)
+			if fileCreateError != nil {
+				log.Fatal("ERROR: can not create file. ", fileCreateError)
+			}
+			encoder = json.NewEncoder(file)
+			intermediateEncoders[intermediateFileName] = encoder
+			intermediateFiles[intermediateFileName] = file
+		}
+		encodeError := encoder.Encode(&value)
+		if encodeError != nil {
+			log.Fatal("ERROR: can not encode. ", encodeError)
+		}
 	}
-	f.Close()
+	for _, file := range intermediateFiles {
+		file.Close()
+	}
 }
 
 func iHash(s string) int {

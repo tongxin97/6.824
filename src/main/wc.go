@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"unicode"
+	"strings"
+	"strconv"
+	"log"
 )
 
 //
@@ -13,8 +17,20 @@ import (
 // and look only at the contents argument. The return value is a slice
 // of key/value pairs.
 //
-func mapF(filename string, contents string) []mapreduce.KeyValue {
+func mapF(filename string, contents string) (kvs []mapreduce.KeyValue) {
 	// Your code here (Part II).
+	splitFunc := func(c rune) bool {
+		return !unicode.IsLetter(c)
+	}
+	words := strings.FieldsFunc(contents, splitFunc)
+	counts := map[string]int{}
+	for _,w := range words {
+		counts[w]++
+	}
+	for w,c := range counts {
+		kvs = append(kvs, mapreduce.KeyValue{w, strconv.Itoa(c)})
+	}
+	return
 }
 
 //
@@ -24,6 +40,15 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// Your code here (Part II).
+	count := 0
+	for _, v := range values {
+		c, err := strconv.Atoi(v)
+		if err != nil {
+			log.Fatal("ERROR: %v can not convert. %v", c, err)
+		}
+		count += c
+	}
+	return strconv.Itoa(count)
 }
 
 // Can be run in 3 ways:

@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sort"
 )
@@ -50,39 +51,49 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
-	outF, err := os.Create(outFile)
-	ErrCheck(err)
-	enc := json.NewEncoder(outF)
+	keyValues := map[string][]string{}
+	for i := 0; i < nMap; i++ {
+		intermediateFileName := reduceName(jobName, i, reduceTask)
+		if _, error := os.Stat(intermediateFileName); os.IsNotExist(error) {
+			debug("file %s not exist\n.", intermediateFileName)
+			continue
+		}
+		file, fileError := os.Open(intermediateFileName)
+		if fileError != nil {
+			log.Fatal("ERROR: can not open file. ", fileError)
+		}
+		decoder := json.NewDecoder(file)
 
-	for m := 0; m < nMap; m++ {
-		reduceFileName := reduceName(jobName, m, reduceTask)
-		f, err := os.Open(reduceFileName)
-		ErrCheck(err)
-		dec := json.NewDecoder(f)
-		kvs := []KeyValue{}
-		var kv KeyValue
+		var value KeyValue
 		for {
-			err := dec.Decode(&kv)
-			if err != nil {
-				// fmt.Printf("Decode err: %s", err)
+			decodeError := decoder.Decode(&value)
+			if decodeError != nil {
 				break
 			}
-			kvs = append(kvs, kv)
-		}
-		sort.Slice(kvs, func(i, j int) bool {
-			return kvs[i].Key < kvs[j].Key
-		})
-
-		i := 0
-		for i < len(kvs) {
-			key := kvs[i].Key
-			values := []string{}
-			for ; i < len(kvs) && kvs[i].Key == key; i++ {
-				values = append(values, kvs[i].Value)
+			if kv, exists := keyValues[value.Key]; exists {
+				keyValues[value.Key] = append(kv, value.Value)
+			} else {
+				keyValues[value.Key] = []string{value.Value}
 			}
-			err := enc.Encode(KeyValue{key, reduceF(key, values)})
-			ErrCheck(err)
+		}
+		file.Close()
+	}
+	var keys []string
+	for k := range keyValues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	mergeFileName := mergeName(jobName, reduceTask)
+	mergeFile, fileCreateError := os.Create(mergeFileName)
+	if fileCreateError != nil {
+		log.Fatal("ERROR: can not create file. ", fileCreateError)
+	}
+	defer mergeFile.Close() // outF, err := os.Create(outFile)
+	encoder := json.NewEncoder(mergeFile)
+	for _, k := range keys {
+		encodeError := encoder.Encode(&KeyValue{k, reduceF(k, keyValues[k])})
+		if encodeError != nil {
+			log.Fatal("ERROR: can not encode. ", encodeError)
 		}
 	}
-	outF.Close()
 }
