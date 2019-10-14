@@ -149,8 +149,7 @@ func (mr *Master) run(jobName string, files []string, nreduce int,
 }
 
 // Wait blocks until the currently scheduled work has completed.
-// This happens when all tasks have scheduled and completed, the final output
-// have been computed, and all workers have been shut down.
+// This happens when all tasks have scheduled and completed, the final output have been computed, and all workers have been shut down.
 func (mr *Master) Wait() {
 	<-mr.doneChannel
 }
