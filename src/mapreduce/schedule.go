@@ -36,17 +36,21 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	for i := 0; i < ntasks; i++ {
 		wg.Add(1)
 		go func(taskIdx int) {
-			worker := <-registerChan
-			args := &DoTaskArgs{
-				JobName:       jobName,
-				File:          mapFiles[taskIdx],
-				Phase:         phase,
-				TaskNumber:    taskIdx,
-				NumOtherPhase: n_other,
-			}
-			if ok := call(worker, "Worker.DoTask", args, nil); ok { // blocking
-				wg.Done()
-				registerChan <- worker
+			for {
+				worker := <-registerChan
+				args := &DoTaskArgs{
+					JobName:       jobName,
+					File:          mapFiles[taskIdx],
+					Phase:         phase,
+					TaskNumber:    taskIdx,
+					NumOtherPhase: n_other,
+				}
+				ok := call(worker, "Worker.DoTask", args, nil) // blocking
+				if ok {
+					wg.Done()
+					registerChan <- worker
+					break
+				} // if failed, execute the for loop again
 			}
 		}(i)
 	}
