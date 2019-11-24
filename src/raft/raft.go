@@ -18,11 +18,11 @@ package raft
 //
 
 import (
-	"sync"
-	"time"
+	"labrpc"
 	"math/rand"
 	"strconv"
-	"labrpc"
+	"sync"
+	"time"
 )
 
 // import "bytes"
@@ -31,9 +31,9 @@ import (
 const (
 	minElectionTimeout = 500
 	maxElectionTimeout = 800
-	followerRole = 0
-	candidateRole = 1
-	leaderRole = 2
+	followerRole       = 0
+	candidateRole      = 1
+	leaderRole         = 2
 )
 
 //
@@ -78,8 +78,8 @@ type Raft struct {
 	matchIndex []int // for each server, index of highest log entry known to be replicated on server
 
 	// custom fields
-	role int 	// peer role: follower/candidate/leader
-	electionTimestamp time.Time	// timestamp of when the latest election timer was started
+	role              int       // peer role: follower/candidate/leader
+	electionTimestamp time.Time // timestamp of when the latest election timer was started
 }
 
 // Log is a struct for log entries
@@ -154,8 +154,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
-	Term        // currentTerm, for candidate to update itself
-	VoteGranted // true means candidate received vote
+	Term        int  // currentTerm, for candidate to update itself
+	VoteGranted bool // true means candidate received vote
 }
 
 //
@@ -164,24 +164,23 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
-	defer rf.mu.UnLock()
+	defer rf.mu.Unlock()
 
 	lastLogIdx := -1
 	lastLogTerm := 0
-	if (len(rf.logs) > 0) {
-		lastLogIdx = len(rf.logs)-1
+	if len(rf.logs) > 0 {
+		lastLogIdx = len(rf.logs) - 1
 		lastLogTerm = rf.logs[lastLogIdx].TermCreated
 	}
 
-	if (args.Term >= rf.currentTerm &&
+	if args.Term >= rf.currentTerm &&
 		(rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-		(args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx)
-	) {
+		(args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx) {
 		reply.Term = args.Term
 		reply.VoteGranted = true
 
 		rf.votedFor = args.CandidateId
-		rf.currentTerm = args.term
+		rf.currentTerm = args.Term
 		go rf.startElectionTimer()
 	} else {
 		reply.Term = rf.currentTerm
@@ -259,26 +258,26 @@ func (rf *Raft) Kill() {
 
 func (rf *Raft) becomeCandidate() {
 	rf.mu.Lock()
-	rf.role = candidateRole	// set role to candidate
-	rf.currentTerm++ // Increment currentTerm
-	rf.votedFor = rf.me // Vote for self
+	rf.role = candidateRole // set role to candidate
+	rf.currentTerm++        // Increment currentTerm
+	rf.votedFor = rf.me     // Vote for self
 
 	currentTerm := rf.currentTerm
-	logIdx := len(rf.logs)-1
-	rf.mu.UnLock()
+	logIdx := len(rf.logs) - 1
+	rf.mu.Unlock()
 
 	go rf.startElectionTimer() // Reset election timer
 
 	// Send RequestVote RPCs to all other servers
 	logTerm := 0
-	if idx >= 0 {
+	if logIdx >= 0 {
 		logTerm = rf.logs[logIdx].TermCreated
 	}
 	req := &RequestVoteArgs{
-		Term: currentTerm,
-		CandidateId: rf.me,
+		Term:         currentTerm,
+		CandidateId:  rf.me,
 		LastLogIndex: logIdx,
-		LastLogTerm: logTerm
+		LastLogTerm:  logTerm,
 	}
 
 	voteCh := make(chan int)
@@ -288,14 +287,14 @@ func (rf *Raft) becomeCandidate() {
 		go func(idx int) {
 			if ok := rf.sendRequestVote(idx, req, res); ok {
 				rf.mu.Lock()
-					if (res.Term > rf.currentTerm) {
-						rf.currentTerm := res.Term
-						rf.role = followerRole
-						roleChanged <- true
-					}
-				rf.mu.UnLock()
+				if res.Term > rf.currentTerm {
+					rf.currentTerm = res.Term
+					rf.role = followerRole
+					roleChanged <- true
+				}
+				rf.mu.Unlock()
 
-				if (res.VoteGranted) {
+				if res.VoteGranted {
 					voteCh <- 1
 				} else {
 					voteCh <- 0
@@ -313,32 +312,33 @@ func (rf *Raft) becomeCandidate() {
 	numReply := 0
 	for {
 		select {
-		case val := <- votedCh:
+		case val := <-voteCh:
 			numVotes += val
 			numReply++
-			if (numReply == len(rf.peers)-1) { // received reply for all peer voters
+			if numReply == len(rf.peers)-1 { // received reply for all peer voters
 				break
 			}
-		case <- roleChanged:	// this peer is no longer a candidate
+		case <-roleChanged: // this peer is no longer a candidate
 			return
 		default:
 		}
 	}
 
-	if (numVotes >= len(rf.peers)/2) {
+	if numVotes >= len(rf.peers)/2 {
 		rf.mu.Lock()
 		rf.role = leaderRole
-		rf.mu.UnLock()
+		rf.mu.Unlock()
 	}
 }
 
 func (rf *Raft) startElectionTimer() {
 	rf.mu.Lock()
 	rf.electionTimestamp = time.Now()
-	rf.mu.UnLock()
-	timeout := rand.Intn(maxElectionTimeout - minElectionTimeout) + maxElectionTimeout
-	time.Sleep(time.ParseDuration(strconv.Itoa(timeout) + "ms"))
-	if (time.Since(rf.electionTimestamp).Microseconds() >= timeout) {
+	rf.mu.Unlock()
+	timeout := rand.Intn(maxElectionTimeout-minElectionTimeout) + maxElectionTimeout
+	dur, _ := time.ParseDuration(strconv.Itoa(timeout) + "ms")
+	time.Sleep(dur)
+	if int(time.Since(rf.electionTimestamp).Seconds()*1e3) >= timeout {
 		// timeout waiting for leader heartbeat, become candidate
 		rf.becomeCandidate()
 	}
