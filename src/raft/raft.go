@@ -29,8 +29,8 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 500
-	maxElectionTimeout = 800
+	minElectionTimeout = 300
+	maxElectionTimeout = 500
 	followerRole       = 0
 	candidateRole      = 1
 	leaderRole         = 2
@@ -88,14 +88,10 @@ type Log struct {
 	TermCreated int // term when entry was received by leader (first index is 1)
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
+// GetState return currentTerm and whether this server believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
-	var term int
-	var isleader bool
 	// Your code here (2A).
-	return term, isleader
+	return rf.currentTerm, rf.role == leaderRole
 }
 
 //
@@ -186,6 +182,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 	}
+
+	DPrintf("%d recv %v", rf.me, args)
+	DPrintf("%d reply %v", rf.me, reply)
 }
 
 //
@@ -280,6 +279,8 @@ func (rf *Raft) becomeCandidate() {
 		LastLogTerm:  logTerm,
 	}
 
+	DPrintf("%d's req %v", rf.me, req)
+
 	voteCh := make(chan int)
 	roleChanged := make(chan bool)
 	res := &RequestVoteReply{}
@@ -338,8 +339,13 @@ func (rf *Raft) startElectionTimer() {
 	timeout := rand.Intn(maxElectionTimeout-minElectionTimeout) + maxElectionTimeout
 	dur, _ := time.ParseDuration(strconv.Itoa(timeout) + "ms")
 	time.Sleep(dur)
-	if int(time.Since(rf.electionTimestamp).Seconds()*1e3) >= timeout {
+
+	rf.mu.Lock()
+	isCandidate := rf.role == candidateRole
+	rf.mu.Unlock()
+	if int(time.Since(rf.electionTimestamp).Seconds()*1e3) >= timeout && !isCandidate {
 		// timeout waiting for leader heartbeat, become candidate
+		DPrintf("%d becomes candidate", rf.me)
 		rf.becomeCandidate()
 	}
 }
