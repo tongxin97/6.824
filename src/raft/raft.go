@@ -29,8 +29,8 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 300
-	maxElectionTimeout = 500
+	minElectionTimeout = 500
+	maxElectionTimeout = 800
 	followerRole       = 0
 	candidateRole      = 1
 	leaderRole         = 2
@@ -68,7 +68,7 @@ type Raft struct {
 
 	currentTerm int    // latest term server has seen
 	votedFor    int    // candidate index that received vote in current term (or -1 if none)
-	logs        []*Log // log entries
+	logs        []*LogEntry // log entries
 
 	commitIndex int // index of highest log entry known to be committed
 	lastApplied int // index of highest log entry applied to state machine
@@ -82,8 +82,8 @@ type Raft struct {
 	electionTimestamp time.Time // timestamp of when the latest election timer was started
 }
 
-// Log is a struct for log entries
-type Log struct {
+// LogEntry is a struct for log entries, used for both local logs and entries field in AppendEntries RPCs
+type LogEntry struct {
 	Command     interface{}
 	TermCreated int // term when entry was received by leader (first index is 1)
 }
@@ -283,9 +283,12 @@ func (rf *Raft) becomeCandidate() {
 
 	voteCh := make(chan int)
 	roleChanged := make(chan bool)
-	res := &RequestVoteReply{}
 	for i := range rf.peers {
+		if i == rf.me { // skip self
+			continue
+		}
 		go func(idx int) {
+			res := &RequestVoteReply{}
 			if ok := rf.sendRequestVote(idx, req, res); ok {
 				rf.mu.Lock()
 				if res.Term > rf.currentTerm {
@@ -311,13 +314,14 @@ func (rf *Raft) becomeCandidate() {
 
 	numVotes := 1 // voted for self
 	numReply := 0
-	for {
+
+	loop: for {
 		select {
 		case val := <-voteCh:
 			numVotes += val
 			numReply++
 			if numReply == len(rf.peers)-1 { // received reply for all peer voters
-				break
+				break loop
 			}
 		case <-roleChanged: // this peer is no longer a candidate
 			return
@@ -329,6 +333,9 @@ func (rf *Raft) becomeCandidate() {
 		rf.mu.Lock()
 		rf.role = leaderRole
 		rf.mu.Unlock()
+		DPrintf("%d becomes leader", rf.me)
+
+		// TODO: rf.becomeLeader()
 	}
 }
 
@@ -373,7 +380,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.logs = []*Log{}
+	rf.logs = []*LogEntry{}
 
 	go rf.startElectionTimer()
 
