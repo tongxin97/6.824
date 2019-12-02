@@ -33,7 +33,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	wg := sync.WaitGroup{}
-	for i := 0; i < ntasks; i++ {
+	numDone := 0
+	for numDone < ntasks {
 		wg.Add(1)
 		go func(taskIdx int) {
 			for {
@@ -52,7 +53,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 					break
 				} // if failed, execute the for loop again
 			}
-		}(i)
+		}(numDone)
 	}
 	wg.Wait()
 

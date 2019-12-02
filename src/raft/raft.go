@@ -29,8 +29,8 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 500
-	maxElectionTimeout = 800
+	minElectionTimeout = 300
+	maxElectionTimeout = 600
 	heartbeatTimeout = 150
 	followerRole       = 0
 	candidateRole      = 1
@@ -167,6 +167,8 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	DPrintf("%d recv RequestVote from %d", rf.me, args.CandidateId)
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -309,7 +311,6 @@ func (rf *Raft) peerAppendEntries() {
 }
 
 func (rf *Raft) becomeCandidate() {
-	DPrintf("%d becomes candidate", rf.me)
 	rf.mu.Lock()
 	rf.role = candidateRole // set role to candidate
 	rf.votedFor = rf.me     // vote for self
@@ -332,7 +333,7 @@ func (rf *Raft) becomeCandidate() {
 		LastLogTerm:  lastLogTerm,
 	}
 
-	DPrintf("%d's args %v", rf.me, args)
+	DPrintf("%d becomes candidate, args %v", rf.me, args)
 
 	voteCh := make(chan int)
 	for i := range rf.peers {
