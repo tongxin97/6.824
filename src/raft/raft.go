@@ -69,7 +69,7 @@ type Raft struct {
 
 	currentTerm int    // latest term server has seen
 	votedFor    int    // candidate index that received vote in current term (or -1 if none)
-	logs        []*LogEntry // log entries
+	logs        []LogEntry // log entries
 
 	commitIndex int // index of highest log entry known to be committed
 	lastApplied int // index of highest log entry applied to state machine
@@ -259,21 +259,52 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 	return ok
 }
 
-func (rf *Raft) handleAppendEntries() {
-	// TODO nonempty args
+// synchronous function
+func (rf *Raft) handleAppendEntries(peerIdx int) {
+	rf.mu.Lock()
+	lastLogIdx := len(rf.logs)
+	nextIdx := rf.nextIndex[peerIdx]
+	sendEmptyRPC := lastLogIdx < nextIdx
+
 	args := &AppendEntryArgs{
+		Term: rf.currentTerm,
 		LeaderId: rf.me,
+		LeaderCommit: rf.commitIndex,
 	}
+	if !sendEmptyRPC {
+		args.PrevLogIndex = nextIdx-1
+		args.PrevLogTerm = rf.logs[args.PrevLogIndex-1].TermCreated
+		args.Entries = rf.logs[nextIdx-1:]
+	}
+	rf.mu.Unlock()
+
+	reply := &AppendEntryReply{}
+	if ok := rf.sendAppendEntries(peerIdx, args, reply); ok {
+		// if reply.Success {
+		// 	rf.mu.Lock()
+		// 	rf.nextIndex[peerIdx] = lastLogIdx + 1
+		// 	rf.matchIndex[peerIdx] = lastLogIdx
+		// 	rf.mu.Unlock()
+		// } else {
+		// 	hasOutdatedTerm := rf.handleReplyTerm(reply.Term)
+		// 	if !hasOutdatedTerm { // AppendEntries fails because of log inconsistency, decrement nextIndex and retry
+		// 		rf.mu.Lock()
+		// 		rf.nextIndex[peerIdx]--
+		// 		rf.mu.Unlock()
+		// 		rf.handleAppendEntries(peerIdx) // retry
+		// 	}
+		// }
+	} else {
+		// DPrintf("%d sendAppendEntries to peer %d failed", rf.me, peerIdx)
+	}
+}
+
+func (rf *Raft) peerAppendEntries() {
 	for i := range rf.peers {
 		if i == rf.me { // skip self
 			continue
 		}
-		reply := &AppendEntryReply{}
-		if ok := rf.sendAppendEntries(i, args, reply); ok {
-			// TODO
-		} else {
-			// DPrintf("%d sendAppendEntries to peer %d failed", rf.me, i)
-		}
+		go rf.handleAppendEntries(i)
 	}
 }
 
@@ -311,13 +342,7 @@ func (rf *Raft) becomeCandidate() {
 		go func(idx int) {
 			reply := &RequestVoteReply{}
 			if ok := rf.sendRequestVote(idx, args, reply); ok {
-				rf.mu.Lock()
-				if reply.Term > rf.currentTerm {
-					rf.currentTerm = reply.Term
-					rf.role = followerRole
-				}
-				rf.mu.Unlock()
-
+				rf.handleReplyTerm(reply.Term)
 				if reply.VoteGranted {
 					voteCh <- 1
 				} else {
@@ -404,11 +429,23 @@ func (rf *Raft) startHeartbeatTimer() {
 		return
 	}
 
-	rf.handleAppendEntries()
+	rf.peerAppendEntries()
 
 	dur, _ := time.ParseDuration(strconv.Itoa(heartbeatTimeout) + "ms")
 	time.Sleep(dur)
 	rf.startHeartbeatTimer()
+}
+
+// handleReplyTerm returns true if reply term is greater than rf.currentTerm
+func (rf *Raft) handleReplyTerm(replyTerm int) (bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if replyTerm > rf.currentTerm {
+		rf.currentTerm = replyTerm
+		rf.role = followerRole
+		return true
+	}
+	return false
 }
 
 //
@@ -468,7 +505,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.logs = []*LogEntry{}
+	rf.logs = []LogEntry{}
 
 	go rf.startElectionTimer()
 
