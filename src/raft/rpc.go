@@ -42,8 +42,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	lastLogIdx, lastLogTerm := -1, 0
-	if len(rf.logs) > 0 {
-		lastLogIdx, lastLogTerm = len(rf.logs), rf.logs[lastLogIdx-1].TermCreated
+	if len(rf.logs) > 1 {
+		lastLogIdx, lastLogTerm = len(rf.logs)-1, rf.logs[lastLogIdx].TermCreated
 	}
 	if args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx {
 		reply.Term, reply.VoteGranted = args.Term, true
@@ -106,12 +106,62 @@ type AppendEntryReply struct {
 
 // AppendEntries RPC handler
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
-	// TODO: validation
+	if rf.handleReplyTerm(reply.Term, -1) {
+		go rf.startElectionTimer()
+		return
+	}
 
-	// convert to follower
 	rf.mu.Lock()
-	rf.role = followerRole
-	rf.votedFor = -1
+	// Reply false if term < currentTerm (§5.1)
+	if args.Term < rf.currentTerm {
+		reply.Term, reply.Success = rf.currentTerm, false
+		return
+	}
+	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+	if args.PrevLogIndex >= 1 {
+		if prevLog := rf.logs[args.PrevLogIndex]; prevLog.TermCreated != args.PrevLogTerm {
+			reply.Term, reply.Success = rf.currentTerm, false
+			return
+		}
+	}
+
+	/*
+		If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
+	*/
+	curLogIdx := args.PrevLogIndex + 1
+	for i, log := range args.Entries {
+		i += curLogIdx
+		if i < len(rf.logs) && rf.logs[i].TermCreated != args.Term {
+			rf.logs = rf.logs[:i]
+		}
+		// Append any new entries not already in the log
+		rf.logs = append(rf.logs, log)
+	}
+
+	// If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+	var newCommitIdx int
+	if args.LeaderCommit > rf.commitIndex {
+		if args.LeaderCommit < len(rf.logs)-1 {
+			newCommitIdx = args.LeaderCommit
+		} else {
+			newCommitIdx = len(rf.logs) - 1
+		}
+	}
+
+	// Send newly committed logs to rf.applyCh
+	for i := rf.commitIndex + 1; i <= newCommitIdx; i++ {
+		rf.applyCh <- ApplyMsg{
+			CommandValid: true,
+			CommandIndex: i,
+			Command:      rf.logs[i].Command,
+		}
+	}
+	rf.commitIndex = newCommitIdx
+
+	reply.Term, reply.Success = rf.currentTerm, true
+
+	if len(args.Entries) > 0 {
+		DPrintf("AppendEntries from %d, reply: %v, logs: %v", args.LeaderId, reply, rf.logs)
+	}
 	rf.mu.Unlock()
-	go rf.startElectionTimer()
 }
