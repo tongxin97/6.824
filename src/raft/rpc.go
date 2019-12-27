@@ -1,9 +1,5 @@
 package raft
 
-//
-// example RequestVote RPC arguments structure.
-// field names must start with capital letters!
-//
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
 	Term         int // candidate’s term
@@ -12,10 +8,6 @@ type RequestVoteArgs struct {
 	LastLogTerm  int // term of candidate’s last log entry
 }
 
-//
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
-//
 type RequestVoteReply struct {
 	// Your data here (2A).
 	Term        int  // currentTerm, for candidate to update itself
@@ -26,33 +18,28 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if rf.currentTerm > args.Term || // invalid candidate
-		(rf.currentTerm == args.Term && rf.votedFor != -1) { // the server has voted in this term
+	// Reply false if term < currentTerm (§5.1)
+	if args.Term < rf.currentTerm {
 		reply.Term, reply.VoteGranted = rf.currentTerm, false
-		return
+	} else if args.Term > rf.currentTerm || rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+		// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+		lastLogIdx, lastLogTerm := -1, 0
+		if len(rf.logs) > 1 {
+			lastLogIdx, lastLogTerm = len(rf.logs)-1, rf.logs[lastLogIdx].TermCreated
+		}
+		if args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx {
+			reply.Term, reply.VoteGranted = args.Term, true
+			rf.votedFor, rf.role, rf.currentTerm = args.CandidateId, followerRole, args.Term
+		} else {
+			reply.Term, reply.VoteGranted = rf.currentTerm, false
+		}
 	}
+	DPrintf("%d reply to %d: %v, role %d", rf.me, args.CandidateId, reply, rf.role)
+	rf.mu.Unlock()
 
-	// args.Term is higher, convert to follower and reset election timer
-	if args.Term > rf.currentTerm {
-		rf.currentTerm, rf.votedFor = args.Term, -1
-		rf.role = followerRole
-		go rf.startElectionTimer()
+	if reply.VoteGranted {
+		rf.resetElectionTimeout() // reset election timer
 	}
-
-	lastLogIdx, lastLogTerm := -1, 0
-	if len(rf.logs) > 1 {
-		lastLogIdx, lastLogTerm = len(rf.logs)-1, rf.logs[lastLogIdx].TermCreated
-	}
-	if args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx {
-		reply.Term, reply.VoteGranted = args.Term, true
-		rf.votedFor = args.CandidateId
-	} else {
-		reply.Term, reply.VoteGranted = rf.currentTerm, false
-	}
-
-	DPrintf("%d reply to %d: %v", rf.me, args.CandidateId, reply)
 }
 
 //
@@ -106,11 +93,6 @@ type AppendEntryReply struct {
 
 // AppendEntries RPC handler
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
-	if rf.handleReplyTerm(reply.Term, -1) {
-		go rf.startElectionTimer()
-		return
-	}
-
 	rf.mu.Lock()
 	// Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
@@ -159,9 +141,11 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.commitIndex = newCommitIdx
 
 	reply.Term, reply.Success = rf.currentTerm, true
+	rf.mu.Unlock()
+
+	rf.resetElectionTimeout()
 
 	if len(args.Entries) > 0 {
 		DPrintf("AppendEntries from %d, reply: %v, logs: %v", args.LeaderId, reply, rf.logs)
 	}
-	rf.mu.Unlock()
 }
