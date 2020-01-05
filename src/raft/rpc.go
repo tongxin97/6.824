@@ -25,7 +25,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 		lastLogIdx, lastLogTerm := -1, 0
 		if len(rf.logs) > 1 {
-			lastLogIdx, lastLogTerm = len(rf.logs)-1, rf.logs[lastLogIdx].TermCreated
+			lastLogIdx = len(rf.logs) - 1
+			lastLogTerm = rf.logs[lastLogIdx].TermCreated
 		}
 		if args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx {
 			reply.Term, reply.VoteGranted = args.Term, true
@@ -100,7 +101,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		return
 	}
 	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-	if args.PrevLogIndex >= 1 {
+	if args.PrevLogIndex >= 1 && args.PrevLogIndex < len(rf.logs) {
 		if prevLog := rf.logs[args.PrevLogIndex]; prevLog.TermCreated != args.PrevLogTerm {
 			reply.Term, reply.Success = rf.currentTerm, false
 			return

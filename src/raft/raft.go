@@ -188,9 +188,9 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 			rf.matchIndex[peerIdx] = lastLogIdx
 			rf.mu.Unlock()
 			// DPrintf("peer %d matchIndex %d", peerIdx, lastLogIdx)
-			// if len(args.Entries) > 0 {
+			if len(args.Entries) > 0 {
 				DPrintf("%d sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
-			// }
+			}
 		} else {
 			if !rf.validateTerm(reply.Term, -1) {
 				// AppendEntries fails because of log inconsistency, decrement nextIndex and retry
