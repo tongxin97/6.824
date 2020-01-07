@@ -86,6 +86,28 @@ func TestReElection2A(t *testing.T) {
 	cfg.end()
 }
 
+func TestExcessiveElection2A(t *testing.T) {
+	servers := 3
+	cfg := make_config(t, servers, false)
+	defer cfg.cleanup()
+
+	cfg.begin("Test (2A): no excessive election after network partition")
+
+	// if a follower disconnects, no new leaders should be elected.
+	leader1 := cfg.checkOneLeader()
+	cfg.disconnect((leader1 + 1) % servers)
+
+	for i := 0; i < 5; i++ {
+		leader2 := cfg.checkOneLeader()
+		if leader1 != leader2 {
+			t.Fatalf("Excessive leader election")
+		}
+		time.Sleep(RaftElectionTimeout/5)
+	}
+
+	cfg.end()
+}
+
 func TestBasicAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)

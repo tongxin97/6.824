@@ -29,8 +29,8 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 300
-	maxElectionTimeout = 500
+	minElectionTimeout = 800
+	maxElectionTimeout = 1000
 	checkElectionInterval = 50
 	heartbeatTimeout   = 100
 	followerRole       = 0
@@ -149,7 +149,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 	return ok
 }
 
-// synchronous function
+// synchronous function for constructing AppendEntries struct and calling sendAppendEntries
 func (rf *Raft) handleAppendEntries(peerIdx int) {
 	rf.mu.Lock()
 	if rf.role != leaderRole {
@@ -158,19 +158,15 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 	}
 	lastLogIdx := len(rf.logs) - 1
 	nextIdx := rf.nextIndex[peerIdx]
-	sendEmptyRPC := lastLogIdx < nextIdx
 
 	args := &AppendEntryArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     rf.me,
 		LeaderCommit: rf.commitIndex,
 	}
-	if !sendEmptyRPC {
+	if nextIdx <= lastLogIdx {
 		args.PrevLogIndex = nextIdx - 1
-		args.PrevLogTerm = 0
-		if args.PrevLogIndex >= 0 {
-			args.PrevLogTerm = rf.logs[args.PrevLogIndex].TermCreated
-		}
+		args.PrevLogTerm = rf.logs[args.PrevLogIndex].TermCreated
 		args.Entries = rf.logs[nextIdx:]
 	}
 	rf.mu.Unlock()
@@ -188,24 +184,27 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 			rf.matchIndex[peerIdx] = lastLogIdx
 			rf.mu.Unlock()
 			// DPrintf("peer %d matchIndex %d", peerIdx, lastLogIdx)
-			if len(args.Entries) > 0 {
-				DPrintf("%d sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
-			}
+			// if len(args.Entries) > 0 {
+			// 	DPrintf("%d sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
+			// } else {
+			// 	DPrintf("%d heartbeat to peer %d", rf.me, peerIdx)
+			// }
 		} else {
 			if !rf.validateTerm(reply.Term, -1) {
 				// AppendEntries fails because of log inconsistency, decrement nextIndex and retry
 				rf.mu.Lock()
 				rf.nextIndex[peerIdx]--
 				rf.mu.Unlock()
+				DPrintf("%d retry sendAppendEntries to peer %d", rf.me, peerIdx)
 				rf.handleAppendEntries(peerIdx) // retry
 			}
 		}
-	} else {
-		// DPrintf("%d sendAppendEntries to peer %d failed", rf.me, peerIdx)
-		// failed to send AppendEntries, network partition? => degrade to follower
-		rf.mu.Lock()
-		rf.role = followerRole
-		rf.mu.Unlock()
+	// } else {
+	// 	if len(args.Entries) > 0 {
+	// 		DPrintf("%d failed to sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
+	// 	} else {
+	// 		DPrintf("%d failed to heartbeat to peer %d", rf.me, peerIdx)
+	// 	}
 	}
 }
 
@@ -248,21 +247,23 @@ func (rf *Raft) peerAppendEntries() {
 			wg.Done()
 		}(i)
 	}
-	wg.Wait()
-	rf.increaseCommitIndex()
+	go func() {
+		wg.Wait()
+		rf.increaseCommitIndex()
+	}()
 }
 
-func (rf *Raft) startHeartbeatTimer() {
-	rf.mu.Lock()
-	isLeader := rf.role == leaderRole
-	rf.mu.Unlock()
-
-	if isLeader {
+func (rf *Raft) heartbeatInterval() {
+	dur, _ := time.ParseDuration(strconv.Itoa(heartbeatTimeout) + "ms")
+	for {
+		rf.mu.Lock()
+		isLeader := rf.role == leaderRole
+		rf.mu.Unlock()
+		if !isLeader {
+			break
+		}
 		rf.peerAppendEntries()
-
-		dur, _ := time.ParseDuration(strconv.Itoa(heartbeatTimeout) + "ms")
 		time.Sleep(dur)
-		rf.startHeartbeatTimer()
 	}
 }
 
@@ -282,14 +283,15 @@ func (rf *Raft) becomeLeader() {
 		rf.matchIndex[i] = 0
 	}
 
-	rf.startHeartbeatTimer()
+	go rf.heartbeatInterval()
 }
 
 func (rf *Raft) resetElectionTimeout() {
-	timeout := rand.Intn(maxElectionTimeout-minElectionTimeout) + maxElectionTimeout
+	timeout := rand.Intn(maxElectionTimeout-minElectionTimeout) + minElectionTimeout
 	dur, _ := time.ParseDuration(strconv.Itoa(timeout) + "ms")
 	rf.mu.Lock()
 	rf.electionTimeout = time.Now().Add(dur)
+	// DPrintf("%d reset election to %s", rf.me, rf.electionTimeout)
 	rf.mu.Unlock()
 }
 
@@ -299,10 +301,15 @@ func (rf *Raft) checkElectionTimeout() {
 	for {
 		time.Sleep(dur)
 		rf.mu.Lock()
-		isTimeout := time.Now().After(rf.electionTimeout)
+		now := time.Now()
+		isTimeout := now.After(rf.electionTimeout)
+		isFollower := rf.role == followerRole
 		rf.mu.Unlock()
-		if isTimeout {
+		if isTimeout && isFollower {
+			// DPrintf("%d now: %s\ntimeout %s", rf.me, now, rf.electionTimeout)
 			rf.becomeCandidate()
+		// } else {
+		// 	DPrintf("%d NO election timeout", rf.me)
 		}
 	}
 }
@@ -315,9 +322,8 @@ func (rf *Raft) becomeCandidate() {
 	currentTerm := rf.currentTerm
 	lastLogIdx := len(rf.logs) - 1
 	rf.mu.Unlock()
+	go rf.resetElectionTimeout()
 
-	// go rf.startElectionTimer() // reset election timer
-	rf.resetElectionTimeout()
 
 	// send RequestVote RPCs to all other servers
 	lastLogTerm := 0
@@ -388,16 +394,16 @@ loop:
 }
 
 
-func (rf *Raft) validateTerm(term int, voteFor int) (convertedToFollower bool) {
+func (rf *Raft) validateTerm(term int, voteFor int) (bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if term > rf.currentTerm {
 		rf.currentTerm, rf.votedFor, rf.role = term, voteFor, followerRole
-		convertedToFollower = true
+		go rf.resetElectionTimeout()
 		DPrintf("%d convertedToFollower", rf.me)
+		return true
 	}
-	convertedToFollower = false
-	return
+	return false
 }
 
 //
@@ -478,8 +484,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.numMajority = len(peers)/2 + 1
 
-	// go rf.startElectionTimer()
-	rf.resetElectionTimeout()
+	go rf.resetElectionTimeout()
 	go rf.checkElectionTimeout()
 
 	// initialize from state persisted before a crash

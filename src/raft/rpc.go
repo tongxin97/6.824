@@ -18,6 +18,7 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
 		reply.Term, reply.VoteGranted = rf.currentTerm, false
@@ -35,11 +36,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.Term, reply.VoteGranted = rf.currentTerm, false
 		}
 	}
-	DPrintf("%d reply to %d: %v, role %d", rf.me, args.CandidateId, reply, rf.role)
-	rf.mu.Unlock()
 
+	DPrintf("%d reply to %d: %v, role %d", rf.me, args.CandidateId, reply, rf.role)
 	if reply.VoteGranted {
-		rf.resetElectionTimeout() // reset election timer
+		go rf.resetElectionTimeout() // reset election timer
 	}
 }
 
@@ -95,15 +95,18 @@ type AppendEntryReply struct {
 // AppendEntries RPC handler
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// Reply false if term < currentTerm (§5.1)
 	if args.Term < rf.currentTerm {
 		reply.Term, reply.Success = rf.currentTerm, false
+		DPrintf("%d received stale AppendEntries from %d, term %d", rf.me, args.LeaderId, args.Term)
 		return
 	}
 	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
 	if args.PrevLogIndex >= 1 && args.PrevLogIndex < len(rf.logs) {
 		if prevLog := rf.logs[args.PrevLogIndex]; prevLog.TermCreated != args.PrevLogTerm {
 			reply.Term, reply.Success = rf.currentTerm, false
+			DPrintf("%d received invalid AppendEntries from %d, prevlog term conflict: %d, %v", rf.me, args.LeaderId, args.PrevLogTerm, prevLog)
 			return
 		}
 	}
@@ -140,13 +143,13 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		}
 	}
 	rf.commitIndex = newCommitIdx
-
 	reply.Term, reply.Success = rf.currentTerm, true
-	rf.mu.Unlock()
 
-	rf.resetElectionTimeout()
+	go rf.resetElectionTimeout()
 
 	if len(args.Entries) > 0 {
-		DPrintf("AppendEntries from %d, reply: %v, logs: %v", args.LeaderId, reply, rf.logs)
+		DPrintf("%d: AppendEntries from %d, reply: %v, logs: %v", rf.me, args.LeaderId, reply.Success, rf.logs)
+	// } else {
+	// 	DPrintf("%d: Heartbeat from %d, reply: %v", rf.me, args.LeaderId, reply.Success)
 	}
 }
