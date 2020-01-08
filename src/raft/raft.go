@@ -32,7 +32,8 @@ const (
 	minElectionTimeout = 800
 	maxElectionTimeout = 1000
 	checkElectionInterval = 50
-	heartbeatTimeout   = 100
+	heartbeatInterval   = 100
+	commitIndexInterval = 150
 	followerRole       = 0
 	candidateRole      = 1
 	leaderRole         = 2
@@ -180,10 +181,12 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 	if ok := rf.sendAppendEntries(peerIdx, args, reply); ok {
 		if reply.Success {
 			rf.mu.Lock()
+			if rf.matchIndex[peerIdx] != lastLogIdx {
+				DPrintf("Advanced peer %d matchIndex to %d", peerIdx, lastLogIdx)
+			}
 			rf.nextIndex[peerIdx] = lastLogIdx + 1
 			rf.matchIndex[peerIdx] = lastLogIdx
 			rf.mu.Unlock()
-			// DPrintf("peer %d matchIndex %d", peerIdx, lastLogIdx)
 			// if len(args.Entries) > 0 {
 			// 	DPrintf("%d sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
 			// } else {
@@ -213,48 +216,59 @@ func (rf *Raft) increaseCommitIndex() {
 		If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex = N (§5.3, §5.4).
 	*/
 	rf.mu.Lock()
-	N := rf.commitIndex + 1
-
-	count := 0
-	for _, matchIdx := range rf.matchIndex {
-		if matchIdx >= N {
-			count++
+	for N := rf.commitIndex + 1; N < len(rf.logs); N++ {
+		count := 0
+		for _, matchIdx := range rf.matchIndex {
+			if matchIdx >= N {
+				count++
+			}
 		}
-	}
-
-	if count >= rf.numMajority-1 && N < len(rf.logs) && rf.logs[N].TermCreated == rf.currentTerm {
-		// send each new committed msg to rf.applyCh
-		rf.applyCh <- ApplyMsg{
-			CommandValid: true,
-			CommandIndex: N,
-			Command:      rf.logs[N].Command,
+		if count >= rf.numMajority-1 && rf.logs[N].TermCreated == rf.currentTerm {
+			for i := rf.commitIndex + 1; i <= N; i++ {
+				// send each new committed msg to rf.applyCh
+				rf.applyCh <- ApplyMsg{
+					CommandValid: true,
+					CommandIndex: i,
+					Command:      rf.logs[i].Command,
+				}
+				DPrintf("%d leader committed %v", rf.me, rf.logs[i])
+			}
+			// increment commitIndex
+			rf.commitIndex = N
+		} else {
+			DPrintf("%d leader commitIndex remains %d, N: %d, count: %d", rf.me, rf.commitIndex, N, count)
 		}
-		// increment commitIndex
-		rf.commitIndex = N
 	}
 	rf.mu.Unlock()
 }
 
+func (rf *Raft) commitIndexInterval() {
+	dur, _ := time.ParseDuration(strconv.Itoa(commitIndexInterval) + "ms")
+	for {
+		rf.mu.Lock()
+		isLeader := rf.role == leaderRole
+		rf.mu.Unlock()
+		if !isLeader {
+			break
+		}
+		rf.increaseCommitIndex()
+		time.Sleep(dur)
+	}
+}
+
 func (rf *Raft) peerAppendEntries() {
-	var wg sync.WaitGroup
 	for i := range rf.peers {
 		if i == rf.me { // skip self
 			continue
 		}
-		wg.Add(1)
 		go func(i int) {
 			rf.handleAppendEntries(i)
-			wg.Done()
 		}(i)
 	}
-	go func() {
-		wg.Wait()
-		rf.increaseCommitIndex()
-	}()
 }
 
 func (rf *Raft) heartbeatInterval() {
-	dur, _ := time.ParseDuration(strconv.Itoa(heartbeatTimeout) + "ms")
+	dur, _ := time.ParseDuration(strconv.Itoa(heartbeatInterval) + "ms")
 	for {
 		rf.mu.Lock()
 		isLeader := rf.role == leaderRole
@@ -284,6 +298,7 @@ func (rf *Raft) becomeLeader() {
 	}
 
 	go rf.heartbeatInterval()
+	go rf.commitIndexInterval()
 }
 
 func (rf *Raft) resetElectionTimeout() {
@@ -438,6 +453,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			LogIndex:    index,
 		}
 		rf.logs = append(rf.logs, log)
+		DPrintf("%d leader logs: %v", rf.me, rf.logs)
 	}
 	rf.mu.Unlock()
 
