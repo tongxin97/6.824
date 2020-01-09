@@ -114,14 +114,19 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	/*
 		If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it (§5.3)
 	*/
+	end := 0
 	for _, log := range args.Entries {
-		i := log.LogIndex
-		if i < len(rf.logs) && rf.logs[i].TermCreated != log.TermCreated {
-			rf.logs = rf.logs[:i]
+		idx := log.LogIndex
+		if idx < len(rf.logs) && rf.logs[idx].TermCreated != log.TermCreated {
+			rf.logs = rf.logs[:idx]
+			break
+		} else if idx >= len(rf.logs) {
+			break
 		}
-		// Append any new entries not already in the log
-		rf.logs = append(rf.logs, log)
+		end++
 	}
+	// Append any new entries not already in the log
+	rf.logs = append(rf.logs, args.Entries[end:]...)
 
 	// If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 	var newCommitIdx int
@@ -151,7 +156,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	go rf.resetElectionTimeout()
 
 	if len(args.Entries) > 0 {
-		DPrintf("%d: AppendEntries from %d, reply: %v, logs: %v", rf.me, args.LeaderId, reply.Success, rf.logs)
+		DPrintf("%d AppendEntries from %d: %v, reply: %v, logs: %v", rf.me, args.LeaderId, args.Entries, reply.Success, rf.logs)
 	// } else {
 	// 	DPrintf("%d: Heartbeat from %d, reply: %v", rf.me, args.LeaderId, reply.Success)
 	}

@@ -182,7 +182,7 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 		if reply.Success {
 			rf.mu.Lock()
 			if rf.matchIndex[peerIdx] != lastLogIdx {
-				DPrintf("Advanced peer %d matchIndex to %d", peerIdx, lastLogIdx)
+				DPrintf("%d advanced peer %d matchIndex to %d", rf.me, peerIdx, lastLogIdx)
 			}
 			rf.nextIndex[peerIdx] = lastLogIdx + 1
 			rf.matchIndex[peerIdx] = lastLogIdx
