@@ -29,7 +29,7 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 800
+	minElectionTimeout = 500
 	maxElectionTimeout = 1000
 	checkElectionInterval = 50
 	heartbeatInterval   = 100
