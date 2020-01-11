@@ -165,7 +165,7 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 		LeaderId:     rf.me,
 		LeaderCommit: rf.commitIndex,
 	}
-	if nextIdx <= lastLogIdx {
+	if nextIdx <= lastLogIdx + 1 {
 		args.PrevLogIndex = nextIdx - 1
 		args.PrevLogTerm = rf.logs[args.PrevLogIndex].TermCreated
 		args.Entries = rf.logs[nextIdx:]
