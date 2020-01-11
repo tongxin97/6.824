@@ -193,7 +193,10 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 			// 	DPrintf("%d heartbeat to peer %d", rf.me, peerIdx)
 			// }
 		} else {
-			if !rf.validateTerm(reply.Term, -1) {
+			rf.mu.Lock()
+			isLeader := rf.role == leaderRole
+			rf.mu.Unlock()
+			if isLeader && !rf.validateTerm(reply.Term, -1) {
 				// AppendEntries fails because of log inconsistency, decrement nextIndex and retry
 				rf.mu.Lock()
 				rf.nextIndex[peerIdx]--

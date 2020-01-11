@@ -19,25 +19,30 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	// Reply false if term < currentTerm (§5.1)
-	if args.Term < rf.currentTerm {
-		reply.Term, reply.VoteGranted = rf.currentTerm, false
-	} else if args.Term > rf.currentTerm || rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+	if args.Term > rf.currentTerm || (args.Term == rf.currentTerm && (rf.votedFor == -1 || rf.votedFor == args.CandidateId)) {
 		// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 		lastLogIdx, lastLogTerm := -1, 0
 		if len(rf.logs) > 1 {
 			lastLogIdx = len(rf.logs) - 1
 			lastLogTerm = rf.logs[lastLogIdx].TermCreated
 		}
-		if args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= lastLogIdx {
+		/*
+			If the logs have last entries with different terms, then the log with the later term is more up-to-date. If the logs end with the same term, then whichever log is longer is more up-to-date
+		*/
+		// if rf.me is more up-to-date than candidate, reject vote
+		if (lastLogTerm > args.LastLogTerm || (lastLogTerm == args.LastLogTerm && lastLogIdx > args.LastLogIndex)) {
+			reply.Term, reply.VoteGranted = rf.currentTerm, false
+			DPrintf("%d rejected candidate %d, args: %v, lastLogTerm %d, lastLogIdx: %d", rf.me, args.CandidateId, args, lastLogTerm, lastLogIdx)
+		} else {
 			reply.Term, reply.VoteGranted = args.Term, true
 			rf.votedFor, rf.role, rf.currentTerm = args.CandidateId, followerRole, args.Term
-		} else {
-			reply.Term, reply.VoteGranted = rf.currentTerm, false
+			DPrintf("%d voted for %d", rf.me, args.CandidateId)
 		}
+	} else {
+		reply.Term, reply.VoteGranted = rf.currentTerm, false
+		DPrintf("%d rejected candidate %d, args: %v, currentTerm: %d, votedFor: %d", rf.me, args.CandidateId, args, rf.currentTerm, rf.votedFor)
 	}
 
-	DPrintf("%d vote reply to %d: %v, role %d", rf.me, args.CandidateId, reply, rf.role)
 	if reply.VoteGranted {
 		go rf.resetElectionTimeout()
 	}
