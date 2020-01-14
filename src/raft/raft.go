@@ -297,6 +297,7 @@ func (rf *Raft) heartbeatInterval() {
 }
 
 func (rf *Raft) becomeLeader() {
+	DPrintf("%d becomes leader", rf.me)
 	rf.mu.Lock()
 	rf.role = leaderRole
 	lastLogIdx := len(rf.logs) - 1
@@ -337,14 +338,15 @@ func (rf *Raft) checkElectionTimeout() {
 		rf.mu.Unlock()
 		if isTimeout && isFollower {
 			// DPrintf("%d now: %s\ntimeout %s", rf.me, now, rf.electionTimeout)
-			rf.becomeCandidate()
+			go rf.becomeCandidate()
 			// } else {
 			// 	DPrintf("%d NO election timeout", rf.me)
 		}
 	}
 }
 
-func (rf *Raft) becomeCandidate() {
+// synchronously send RequestVote RPCs to all other servers
+func (rf *Raft) gatherVotes() (numVotes int) {
 	rf.mu.Lock()
 	rf.role = candidateRole // set role to candidate
 	rf.votedFor = rf.me     // vote for self
@@ -356,7 +358,6 @@ func (rf *Raft) becomeCandidate() {
 	go rf.persist()
 	go rf.resetElectionTimeout()
 
-	// send RequestVote RPCs to all other servers
 	lastLogTerm := 0
 	if lastLogIdx > 0 {
 		lastLogTerm = rf.logs[lastLogIdx].TermCreated
@@ -368,8 +369,6 @@ func (rf *Raft) becomeCandidate() {
 		LastLogTerm:  lastLogTerm,
 	}
 
-	DPrintf("%d becomes candidate, args %v", rf.me, args)
-
 	voteCh := make(chan int)
 	for i := range rf.peers {
 		if i == rf.me { // skip self
@@ -377,50 +376,44 @@ func (rf *Raft) becomeCandidate() {
 		}
 		go func(idx int) {
 			reply := &RequestVoteReply{}
-		loop:
 			for {
 				if ok := rf.sendRequestVote(idx, args, reply); ok {
-					if rf.convertToFollower(reply.Term, -1) {
-						return
-					}
-					if reply.VoteGranted {
+					if !rf.convertToFollower(reply.Term, -1) && reply.VoteGranted {
 						voteCh <- 1
 					} else {
 						voteCh <- 0
 					}
-					break loop
-					// } else {
-					// DPrintf("%d sendRequestVote to peer %d failed", rf.me, idx)
+					break
 				}
 			}
 		}(i)
 	}
 
-	numVotes := 1 // voted for self
+	numVotes = 1 // voted for self
 	numReply := 0
-loop:
 	for {
 		select {
 		case val := <-voteCh:
 			numVotes += val
 			numReply++
 			if numReply >= rf.numMajority-1 { // received reply for majority of peer voters, excluding itself
-				break loop
+				return
 			}
 		default:
 		}
 	}
+}
 
+func (rf *Raft) becomeCandidate() {
+	DPrintf("%d becomes candidate", rf.me)
+	numVotes := rf.gatherVotes()
 	rf.mu.Lock()
-	isCandidate := rf.role == candidateRole
-	rf.mu.Unlock()
-	if numVotes >= rf.numMajority && isCandidate {
-		DPrintf("%d becomes leader, votes: %d", rf.me, numVotes)
-		rf.becomeLeader()
+	defer rf.mu.Unlock()
+	if numVotes >= rf.numMajority && rf.role == candidateRole {
+		go rf.becomeLeader()
 	} else {
-		rf.mu.Lock()
+		rf.role = followerRole
 		rf.votedFor = -1
-		rf.mu.Unlock()
 	}
 }
 
@@ -512,6 +505,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	rf.commitIndex = 0
+	// TODO: implement update lastApplied on all servers
 	rf.lastApplied = 0
 	rf.applyCh = applyCh
 	rf.numMajority = len(peers)/2 + 1

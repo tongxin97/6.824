@@ -456,7 +456,7 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 					// committed
 					if cmd2, ok := cmd1.(int); ok && cmd2 == cmd {
 						// and it was the command we submitted.
-						// fmt.Printf("Committed, cmd %d, nd %d\n", cmd, nd)
+						fmt.Printf("Committed, cmd %d, nd %d\n", cmd, nd)
 						return index
 					}
 				}

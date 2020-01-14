@@ -27,25 +27,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			lastLogTerm = rf.logs[lastLogIdx].TermCreated
 		}
 		/*
+			If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 			If the logs have last entries with different terms, then the log with the later term is more up-to-date. If the logs end with the same term, then whichever log is longer is more up-to-date
 		*/
 		// if rf.me is more up-to-date than candidate, reject vote
 		if lastLogTerm > args.LastLogTerm || (lastLogTerm == args.LastLogTerm && lastLogIdx > args.LastLogIndex) {
 			reply.Term, reply.VoteGranted = rf.currentTerm, false
-			DPrintf("%d rejected candidate %d, args: %v, lastLogTerm %d, lastLogIdx: %d", rf.me, args.CandidateId, args, lastLogTerm, lastLogIdx)
+			DPrintf("%d rejected candidate %d, lastLogTerm (%d, %d), lastLogIdx: (%d, %d)", rf.me, args.CandidateId, lastLogTerm, args.LastLogTerm, lastLogIdx, args.LastLogIndex)
 		} else {
 			reply.Term, reply.VoteGranted = args.Term, true
 			rf.votedFor, rf.role, rf.currentTerm = args.CandidateId, followerRole, args.Term
 			go rf.persist()
+			go rf.resetElectionTimeout()
 			DPrintf("%d voted for %d", rf.me, args.CandidateId)
 		}
 	} else {
 		reply.Term, reply.VoteGranted = rf.currentTerm, false
 		DPrintf("%d rejected candidate %d, args: %v, currentTerm: %d, votedFor: %d", rf.me, args.CandidateId, args, rf.currentTerm, rf.votedFor)
-	}
-
-	if reply.VoteGranted {
-		go rf.resetElectionTimeout()
 	}
 }
 
@@ -163,9 +161,9 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	reply.Term, reply.Success = rf.currentTerm, true
 
-	if len(args.Entries) > 0 {
-		DPrintf("%d AppendEntries from %d: %v, reply: %v, logs: %v", rf.me, args.LeaderId, args.Entries, reply.Success, rf.logs)
+	// if len(args.Entries) > 0 {
+	// 	DPrintf("%d AppendEntries from %d: %v, reply: %v, logs: %v", rf.me, args.LeaderId, args.Entries, reply.Success, rf.logs)
 		// } else {
 		// 	DPrintf("%d: Heartbeat from %d, reply: %v", rf.me, args.LeaderId, reply.Success)
-	}
+	// }
 }
