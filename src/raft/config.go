@@ -233,7 +233,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	fmt.Printf("connect(%d)\n", i)
+	// fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
 
@@ -256,7 +256,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	fmt.Printf("disconnect(%d)\n", i)
+	// fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
 
@@ -456,7 +456,7 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 					// committed
 					if cmd2, ok := cmd1.(int); ok && cmd2 == cmd {
 						// and it was the command we submitted.
-						fmt.Printf("Committed, cmd %d, nd %d\n", cmd, nd)
+						// fmt.Printf("Committed, cmd %d, nd %d\n", cmd, nd)
 						return index
 					}
 				}
