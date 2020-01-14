@@ -102,7 +102,7 @@ func TestExcessiveElection2A(t *testing.T) {
 		if leader1 != leader2 {
 			t.Fatalf("Excessive leader election")
 		}
-		time.Sleep(RaftElectionTimeout/5)
+		time.Sleep(RaftElectionTimeout / 5)
 	}
 
 	cfg.end()

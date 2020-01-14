@@ -30,7 +30,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			If the logs have last entries with different terms, then the log with the later term is more up-to-date. If the logs end with the same term, then whichever log is longer is more up-to-date
 		*/
 		// if rf.me is more up-to-date than candidate, reject vote
-		if (lastLogTerm > args.LastLogTerm || (lastLogTerm == args.LastLogTerm && lastLogIdx > args.LastLogIndex)) {
+		if lastLogTerm > args.LastLogTerm || (lastLogTerm == args.LastLogTerm && lastLogIdx > args.LastLogIndex) {
 			reply.Term, reply.VoteGranted = rf.currentTerm, false
 			DPrintf("%d rejected candidate %d, args: %v, lastLogTerm %d, lastLogIdx: %d", rf.me, args.CandidateId, args, lastLogTerm, lastLogIdx)
 		} else {
@@ -148,7 +148,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		}
 
 		// Send newly committed logs to rf.applyCh
-		for i := rf.commitIndex+1; i <= newCommitIdx; i++ {
+		for i := rf.commitIndex + 1; i <= newCommitIdx; i++ {
 			rf.applyCh <- ApplyMsg{
 				CommandValid: true,
 				CommandIndex: i,
@@ -165,7 +165,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	if len(args.Entries) > 0 {
 		DPrintf("%d AppendEntries from %d: %v, reply: %v, logs: %v", rf.me, args.LeaderId, args.Entries, reply.Success, rf.logs)
-	// } else {
-	// 	DPrintf("%d: Heartbeat from %d, reply: %v", rf.me, args.LeaderId, reply.Success)
+		// } else {
+		// 	DPrintf("%d: Heartbeat from %d, reply: %v", rf.me, args.LeaderId, reply.Success)
 	}
 }

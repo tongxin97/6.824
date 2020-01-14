@@ -31,14 +31,14 @@ import (
 // import "labgob"
 
 const (
-	minElectionTimeout = 500
-	maxElectionTimeout = 1000
+	minElectionTimeout    = 500
+	maxElectionTimeout    = 1000
 	checkElectionInterval = 50
-	heartbeatInterval   = 100
-	commitIndexInterval = 150
-	followerRole       = 0
-	candidateRole      = 1
-	leaderRole         = 2
+	heartbeatInterval     = 100
+	commitIndexInterval   = 150
+	followerRole          = 0
+	candidateRole         = 1
+	leaderRole            = 2
 )
 
 //
@@ -83,10 +83,10 @@ type Raft struct {
 	matchIndex []int // for each server, index of highest log entry known to be replicated on server
 
 	// custom fields
-	applyCh           chan ApplyMsg
-	role              int       // peer role: follower/candidate/leader
+	applyCh         chan ApplyMsg
+	role            int       // peer role: follower/candidate/leader
 	electionTimeout time.Time // when it's time to start an election (future time)
-	numMajority       int       // number of majority peers = len(rf.peers)/2 + 1, including the current server
+	numMajority     int       // number of majority peers = len(rf.peers)/2 + 1, including the current server
 }
 
 // LogEntry is a struct for log entries, used for both local logs and entries field in AppendEntries RPCs
@@ -177,7 +177,7 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 		LeaderId:     rf.me,
 		LeaderCommit: rf.commitIndex,
 	}
-	if nextIdx <= lastLogIdx + 1 {
+	if nextIdx <= lastLogIdx+1 {
 		args.PrevLogIndex = nextIdx - 1
 		args.PrevLogTerm = rf.logs[args.PrevLogIndex].TermCreated
 		args.Entries = rf.logs[nextIdx:]
@@ -208,7 +208,7 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 			rf.mu.Lock()
 			isLeader := rf.role == leaderRole
 			rf.mu.Unlock()
-			if isLeader && !rf.validateTerm(reply.Term, -1) {
+			if isLeader && !rf.convertToFollower(reply.Term, -1) {
 				// AppendEntries fails because of log inconsistency, decrement nextIndex and retry
 				rf.mu.Lock()
 				rf.nextIndex[peerIdx]--
@@ -217,12 +217,12 @@ func (rf *Raft) handleAppendEntries(peerIdx int) {
 				rf.handleAppendEntries(peerIdx) // retry
 			}
 		}
-	// } else {
-	// 	if len(args.Entries) > 0 {
-	// 		DPrintf("%d failed to sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
-	// 	} else {
-	// 		DPrintf("%d failed to heartbeat to peer %d", rf.me, peerIdx)
-	// 	}
+		// } else {
+		// 	if len(args.Entries) > 0 {
+		// 		DPrintf("%d failed to sendAppendEntries %v to peer %d", rf.me, args, peerIdx)
+		// 	} else {
+		// 		DPrintf("%d failed to heartbeat to peer %d", rf.me, peerIdx)
+		// 	}
 	}
 }
 
@@ -338,8 +338,8 @@ func (rf *Raft) checkElectionTimeout() {
 		if isTimeout && isFollower {
 			// DPrintf("%d now: %s\ntimeout %s", rf.me, now, rf.electionTimeout)
 			rf.becomeCandidate()
-		// } else {
-		// 	DPrintf("%d NO election timeout", rf.me)
+			// } else {
+			// 	DPrintf("%d NO election timeout", rf.me)
 		}
 	}
 }
@@ -380,7 +380,7 @@ func (rf *Raft) becomeCandidate() {
 		loop:
 			for {
 				if ok := rf.sendRequestVote(idx, args, reply); ok {
-					if rf.validateTerm(reply.Term, -1) { // if converted to follower, return
+					if rf.convertToFollower(reply.Term, -1) {
 						return
 					}
 					if reply.VoteGranted {
@@ -389,7 +389,7 @@ func (rf *Raft) becomeCandidate() {
 						voteCh <- 0
 					}
 					break loop
-				// } else {
+					// } else {
 					// DPrintf("%d sendRequestVote to peer %d failed", rf.me, idx)
 				}
 			}
@@ -424,15 +424,14 @@ loop:
 	}
 }
 
-
-func (rf *Raft) validateTerm(term int, voteFor int) (bool) {
+func (rf *Raft) convertToFollower(term int, voteFor int) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if term > rf.currentTerm {
 		rf.currentTerm, rf.votedFor, rf.role = term, voteFor, followerRole
 		go rf.persist()
 		go rf.resetElectionTimeout()
-		DPrintf("%d convertedToFollower", rf.me)
+		DPrintf("%d convertToFollower", rf.me)
 		return true
 	}
 	return false
