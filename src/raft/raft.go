@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"bytes"
+	"labgob"
 	"labrpc"
 	"math/rand"
 	"strconv"
@@ -114,35 +116,45 @@ func (rf *Raft) GetState() (int, bool) {
 //
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	if e.Encode(rf.currentTerm) == nil && e.Encode(rf.votedFor) == nil && e.Encode(rf.logs) == nil {
+		data := w.Bytes()
+		rf.persister.SaveRaftState(data)
+	} else {
+		DPrintf("persist encode error")
+	}
 }
 
 //
 // restore previously persisted state.
 //
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if data == nil || len(data) < 1 { // bootstrap without any state
+		rf.currentTerm = 0
+		rf.votedFor = -1
+		rf.logs = []LogEntry{{nil, 0, 0}}
+	} else {
+		r := bytes.NewBuffer(data)
+		d := labgob.NewDecoder(r)
+		var currentTerm int
+		var votedFor int
+		var logs []LogEntry
+		if d.Decode(&currentTerm) == nil && d.Decode(&votedFor) == nil && d.Decode(&logs) == nil {
+			rf.currentTerm = currentTerm
+			rf.votedFor = votedFor
+			rf.logs = logs
+		} else {
+			DPrintf("readPersist decode error")
+			return
+		}
+	}
+	// DPrintf("%d readPersist: %d, %d, %v", rf.me, rf.currentTerm, rf.votedFor, rf.logs)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *AppendEntryReply) bool {
@@ -340,8 +352,9 @@ func (rf *Raft) becomeCandidate() {
 	currentTerm := rf.currentTerm
 	lastLogIdx := len(rf.logs) - 1
 	rf.mu.Unlock()
-	go rf.resetElectionTimeout()
 
+	go rf.persist()
+	go rf.resetElectionTimeout()
 
 	// send RequestVote RPCs to all other servers
 	lastLogTerm := 0
@@ -417,6 +430,7 @@ func (rf *Raft) validateTerm(term int, voteFor int) (bool) {
 	defer rf.mu.Unlock()
 	if term > rf.currentTerm {
 		rf.currentTerm, rf.votedFor, rf.role = term, voteFor, followerRole
+		go rf.persist()
 		go rf.resetElectionTimeout()
 		DPrintf("%d convertedToFollower", rf.me)
 		return true
@@ -461,6 +475,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Unlock()
 
 	if isLeader {
+		go rf.persist()
 		rf.peerAppendEntries()
 	}
 	return index, term, isLeader
@@ -494,20 +509,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-	rf.currentTerm = 0
-	rf.votedFor = -1
+	// initialize from state persisted before a crash if any
+	rf.readPersist(persister.ReadRaftState())
+
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.logs = []LogEntry{{nil, 0, 0}}
-
 	rf.applyCh = applyCh
 	rf.numMajority = len(peers)/2 + 1
 
 	go rf.resetElectionTimeout()
 	go rf.checkElectionTimeout()
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
 
 	return rf
 }

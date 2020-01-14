@@ -36,6 +36,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		} else {
 			reply.Term, reply.VoteGranted = args.Term, true
 			rf.votedFor, rf.role, rf.currentTerm = args.CandidateId, followerRole, args.Term
+			go rf.persist()
 			DPrintf("%d voted for %d", rf.me, args.CandidateId)
 		}
 	} else {
@@ -133,6 +134,9 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	// Append any new entries not already in the log
 	rf.logs = append(rf.logs, args.Entries[end:]...)
 
+	go rf.persist()
+	go rf.resetElectionTimeout()
+
 	// If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
 	var newCommitIdx int
 	if args.LeaderCommit > rf.commitIndex {
@@ -158,7 +162,6 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	}
 
 	reply.Term, reply.Success = rf.currentTerm, true
-	go rf.resetElectionTimeout()
 
 	if len(args.Entries) > 0 {
 		DPrintf("%d AppendEntries from %d: %v, reply: %v, logs: %v", rf.me, args.LeaderId, args.Entries, reply.Success, rf.logs)
